@@ -1,0 +1,34 @@
+[package]
+name = "knex-keygen"
+version = "3.1.0"
+edition = "2021"
+authors = ["David Otero"]
+license = "MIT"
+description = "KnexCoin Secure Key Generator — Ed25519 + ML-DSA-65 (FIPS 204)"
+
+[[bin]]
+name = "knex-keygen"
+path = "src/main.rs"
+
+[dependencies]
+# Cryptography
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+fips204 = "0.4"
+sha2 = "0.10"
+rand = "0.8"
+num-bigint = "0.4"
+num-traits = "0.2"
+zeroize = { version = "1", features = ["derive"] }
+
+# Serialization
+serde_json = "1"
+hex = "0.4"
+
+# Utils
+chrono = "0.4"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
