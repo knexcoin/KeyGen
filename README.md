@@ -14,10 +14,12 @@ Secure offline key generator for KnexCoin. Generates hybrid **Ed25519 + ML-DSA-6
 
 Private keys are **never** printed to the terminal. The generator:
 
-1. Writes keys to an encrypted JSON file with `0600` permissions (owner-only)
+1. Writes keys to a JSON file with `0600` permissions (owner-only)
 2. Zeroizes all sensitive memory using the [`zeroize`](https://crates.io/crates/zeroize) crate
 3. Clears the terminal screen and scrollback buffer on exit
 4. Marks the output file as hidden on Windows
+5. Password input is hidden (no echo) via [`rpassword`](https://crates.io/crates/rpassword)
+6. Encrypted files use AES-256-GCM — plaintext keys **never touch disk**
 
 ### Shell History Protection
 
@@ -35,37 +37,18 @@ Most shells (bash, zsh) skip history entries that start with a space when `HISTC
 knex-keygen [OPTIONS]
 
 Options:
-  -o, --output <path>  Output JSON file path (default: knex-keys-<timestamp>.json)
-  --classical          Generate Ed25519 only (no ML-DSA-65)
-  --no-clear           Don't clear terminal on exit (useful for scripting)
-  -h, --help           Show help
+  -o, --output <path>    Output JSON file path (default: knex-keys-<timestamp>.json)
+  -s, --suffix <chars>   Vanity address suffix (1-7 Base62 chars, case-sensitive)
+  -p, --password         Encrypt output with password (AES-256-GCM)
+  --classical            Generate Ed25519 only (no ML-DSA-65)
+  --no-clear             Don't clear terminal on exit (useful for scripting)
+  -h, --help             Show help
 ```
 
 ### Generate Hybrid Keys (Recommended)
 
 ```bash
  knex-keygen
-```
-
-Output:
-```
-Generating hybrid keypair (Ed25519 + ML-DSA-65)...
-
-=== KnexCoin Hybrid Key Generated (Ed25519 + ML-DSA-65) ===
-
-  Address:  9tc3jrlk0ZQeMLQjS57AEjCsFKJDetKK3BWDp4pmxF9jNnjDjc
-  Saved to: knex-keys-2026-02-22T04-26-27.json
-  Mode:     owner read/write only
-
-  Algorithms:
-    Classical:    Ed25519
-    Post-Quantum: ML-DSA-65 (FIPS 204)
-
-  All keys are in the JSON file — NEVER share it.
-  Bind the PQ key on-chain via a PqBind block.
-  Transfer the file securely, then delete from this machine.
-
-  Press ENTER to clear screen and exit...
 ```
 
 ### Generate Classical Keys Only
@@ -80,13 +63,73 @@ Generating hybrid keypair (Ed25519 + ML-DSA-65)...
  knex-keygen -o /secure/usb/my-keys.json
 ```
 
-## Output Format
+### Vanity Address Suffix
+
+Mine a key until the address ends with your chosen characters:
+
+```bash
+ knex-keygen --suffix Dev
+```
+
+The generator will loop Ed25519 key generation until it finds an address ending with your suffix. Progress is displayed in real-time with keys/sec rate and ETA.
+
+**Base62 is case-sensitive** — `Dev` and `dev` are different suffixes.
+
+| Suffix Length | Expected Attempts | Estimated Time |
+|:---:|---:|:---:|
+| 1 | 62 | instant |
+| 2 | 3,844 | instant |
+| 3 | 238,328 | ~1 sec |
+| 4 | 14.7 M | ~30 sec |
+| 5 | 916.1 M | ~30 min |
+| 6 | 56.8 B | ~hours |
+| 7 | 3.5 T | ~days |
+
+For hybrid keys (`--suffix` without `--classical`), the slow ML-DSA-65 keypair is only generated **after** a matching Ed25519 address is found.
+
+### Password-Protected Export
+
+Encrypt the output JSON with a password:
+
+```bash
+ knex-keygen --password
+```
+
+You will be prompted to enter and confirm a password (minimum 8 characters). The password input is hidden — no characters are displayed.
+
+The plaintext key JSON is encrypted in memory and **never written to disk**. The output file (`.enc.json`) contains an encrypted envelope:
+
+```json
+{
+  "format": "knex-keygen-encrypted-v1",
+  "kdf": "PBKDF2-SHA256",
+  "iterations": 600000,
+  "salt": "<64 hex chars>",
+  "nonce": "<24 hex chars>",
+  "ciphertext": "<hex>"
+}
+```
+
+**Encryption details:**
+- Key derivation: PBKDF2-HMAC-SHA256 with 600,000 iterations
+- Cipher: AES-256-GCM with random 12-byte nonce
+- Salt: 32 bytes, cryptographically random
+
+### Combined Features
+
+All flags can be combined:
+
+```bash
+ knex-keygen --suffix Ace --password --classical -o /usb/vanity-keys.enc.json
+```
+
+## Output Format (Plaintext)
 
 The JSON file contains:
 
 ```json
 {
-  "generator": "KnexCoin Key Generator v3.1 (Hybrid PQ)",
+  "generator": "KnexCoin Key Generator v3.2 (Hybrid PQ)",
   "generated": "2026-02-22T04:26:27.438Z",
   "network": "knexcoin-mainnet",
   "algorithms": {
@@ -117,6 +160,8 @@ The JSON file contains:
 |-----------|----------|-----------|----------------|
 | Ed25519 | RFC 8032 | 32 + 32 bytes | 64 bytes |
 | ML-DSA-65 | FIPS 204 | 1,952 + 4,032 bytes | 3,309 bytes |
+| AES-256-GCM | NIST SP 800-38D | 256-bit key | N/A |
+| PBKDF2-SHA256 | RFC 8018 | 600,000 iterations | N/A |
 
 - **Address** is derived from the Ed25519 public key using SHA-256 checksum + Base62 encoding
 - **ML-DSA-65** (formerly Dilithium) provides post-quantum resistance against Shor's algorithm
